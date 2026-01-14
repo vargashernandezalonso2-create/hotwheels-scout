@@ -1,16 +1,19 @@
-import requests
-from bs4 import BeautifulSoup
+import pandas as pd
 import json
 import re
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+import os
 
 console = Console()
 
-# aaa archivo para guardar la database -bynd
+# aaa archivos -bynd
 HOTLIST_FILE = "hotlist.json"
+CSV_2024_FILE = "hotwheels_2024.csv"
+CSV_2025_FILE = "hotwheels_2025.csv"
+CSV_2026_FILE = "hotwheels_2026.csv"
 
 # ey marcas JDM -bynd
 JDM_BRANDS = [
@@ -35,77 +38,128 @@ MUSCLE_BRANDS = [
     "corvette", "firebird", "trans am", "gto", "chevelle", "impala"
 ]
 
-def fetch_2024_lineup():
-    # q chidoteee scrapeamos el lineup 2024 -bynd
-    console.print("[yellow]🔍 Descargando lineup 2024 de Hot Wheels...[/yellow]")
+def scrape_year_to_csv(year):
+    # q chidoteee scrapeamos un año específico -bynd
+    console.print(f"[yellow]🔍 Scrapeando Hot Wheels {year} desde Fandom...[/yellow]")
     
-    url = "https://hwcollectorsnews.com/2024-hot-wheels-mainline-by-number/"
+    # ey URLs según el año -bynd
+    if year == 2024:
+        url = "https://hotwheels.fandom.com/wiki/List_of_2024_Hot_Wheels"
+        csv_file = CSV_2024_FILE
+    elif year == 2025:
+        url = "https://hotwheels.fandom.com/wiki/List_of_2025_Hot_Wheels"
+        csv_file = CSV_2025_FILE
+    elif year == 2026:
+        url = "https://hotwheels.fandom.com/wiki/List_of_2026_Hot_Wheels_(by_Series)"
+        csv_file = CSV_2026_FILE
+    else:
+        console.print(f"[red]Año {year} no soportado[/red]")
+        return None
     
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # aaa leemos las tablas -bynd
+        tables = pd.read_html(url)
         
-        # aaa buscamos el contenido -bynd
-        content = soup.find('div', class_='entry-content')
-        if not content:
-            console.print("[red]No se pudo encontrar el contenido[/red]")
-            return []
+        if not tables:
+            console.print(f"[red]No se encontraron tablas en {url}[/red]")
+            return None
+        
+        # chintrolas la tabla principal suele ser la 1 o 2 -bynd
+        df = None
+        for i, table in enumerate(tables):
+            # fokeis buscamos la tabla que tenga columnas relevantes -bynd
+            if any(col in str(table.columns).lower() for col in ['name', 'series', 'number']):
+                df = table
+                console.print(f"[dim]Usando tabla #{i}[/dim]")
+                break
+        
+        if df is None and len(tables) > 1:
+            df = tables[1]  # vavavava fallback a la segunda tabla -bynd
+        elif df is None:
+            df = tables[0]
+        
+        # ey guardamos a CSV -bynd
+        df.to_csv(csv_file, index=False, encoding='utf-8')
+        console.print(f"[green]✓ Guardado en {csv_file}[/green]")
+        console.print(f"[dim]Total de filas: {len(df)}[/dim]")
+        
+        return csv_file
+        
+    except Exception as e:
+        console.print(f"[red]Error al scrapear {year}: {e}[/red]")
+        return None
+
+def csv_to_json(csv_file, year):
+    # aaa convertimos CSV a formato JSON estructurado -bynd
+    console.print(f"[yellow]📋 Procesando {csv_file}...[/yellow]")
+    
+    if not os.path.exists(csv_file):
+        console.print(f"[red]Archivo {csv_file} no existe[/red]")
+        return []
+    
+    try:
+        df = pd.read_csv(csv_file, encoding='utf-8')
+        
+        # chintrolas normalizamos nombres de columnas -bynd
+        df.columns = df.columns.str.lower().str.strip()
         
         cars = []
-        lines = content.get_text().split('\n')
         
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # ey parseamos cada línea -bynd
-            # formato: "199 Porsche 911 GT3 – – – FACTORY FRESH"
-            match = re.match(r'^(\d+)\s+(.+?)\s+–\s+–\s+–\s+(.+)$', line)
-            if match:
-                number = match.group(1)
-                name = match.group(2).strip()
-                series = match.group(3).strip()
-                
-                # chintrolas detectamos TH y STH -bynd
-                is_th = "Treasure Hunt" in line
-                is_sth = "$uper Treasure Hunt" in line or "Super Treasure Hunt" in line
-                
-                # fokeis limpiamos el nombre -bynd
-                name = name.replace('![$uper Treasure Hunt]', '').replace('![Treasure Hunt]', '').strip()
-                
-                cars.append({
-                    "number": number,
-                    "name": name,
-                    "series": series,
-                    "year": 2024,
-                    "is_th": is_th,
-                    "is_sth": is_sth
-                })
+        for idx, row in df.iterrows():
+            # ey intentamos extraer info de diferentes formatos -bynd
+            car_data = {}
+            
+            # fokeis diferentes sitios tienen diferentes columnas -bynd
+            # vavavava intentamos encontrar el nombre -bynd
+            name = None
+            for col in ['name', 'casting', 'model', 'car']:
+                if col in row and pd.notna(row[col]):
+                    name = str(row[col]).strip()
+                    break
+            
+            if not name or name == 'nan':
+                continue  # aaa skip si no tiene nombre -bynd
+            
+            # chintrolas serie -bynd
+            series = "Unknown"
+            for col in ['series', 'segment', 'line', 'collection']:
+                if col in row and pd.notna(row[col]):
+                    series = str(row[col]).strip()
+                    break
+            
+            # ey número -bynd
+            number = str(idx + 1)
+            for col in ['#', 'number', 'no', 'num']:
+                if col in row and pd.notna(row[col]):
+                    number = str(row[col]).strip()
+                    break
+            
+            # fokeis detectamos TH y STH -bynd
+            is_th = False
+            is_sth = False
+            row_str = str(row).lower()
+            if 'super treasure hunt' in row_str or 'sth' in row_str:
+                is_sth = True
+            elif 'treasure hunt' in row_str or 'th' in row_str:
+                is_th = True
+            
+            car_data = {
+                "number": number,
+                "name": name,
+                "series": series,
+                "year": year,
+                "is_th": is_th,
+                "is_sth": is_sth
+            }
+            
+            cars.append(car_data)
         
+        console.print(f"[green]✓ {len(cars)} carritos procesados de {year}[/green]")
         return cars
         
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error procesando CSV: {e}[/red]")
         return []
-
-def fetch_2025_lineup():
-    # vavavava lo mismo para 2025 -bynd
-    console.print("[yellow]🔍 Descargando lineup 2025 de Hot Wheels...[/yellow]")
-    
-    # aaa por ahora usamos data simulada porque el sitio no tiene la lista completa -bynd
-    # ey cuando salga completa se puede scrapear igual que 2024 -bynd
-    
-    sample_2025 = [
-        {"number": "1", "name": "Custom Ford Bronco", "series": "HW DREAM GARAGE", "year": 2025, "is_th": False, "is_sth": False},
-        {"number": "2", "name": "Lamborghini Revuelto", "series": "HW EXOTICS", "year": 2025, "is_th": False, "is_sth": False},
-        {"number": "3", "name": "MG Metro 6R4", "series": "RALLY", "year": 2025, "is_th": False, "is_sth": False},
-        {"number": "4", "name": "'83 Chevy Silverado", "series": "HW HOT TRUCKS", "year": 2025, "is_th": False, "is_sth": False},
-    ]
-    
-    console.print("[dim]💡 Usando data de ejemplo para 2025 (lineup completo aún no disponible)[/dim]")
-    return sample_2025
 
 def classify_car(car):
     # ey aquí clasificamos cada carro -bynd
@@ -185,22 +239,23 @@ def build_hotlist():
     
     all_cars = []
     
+    # aaa scrapeamos los años disponibles -bynd
+    years_to_scrape = [2024, 2025, 2026]
+    
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console
     ) as progress:
         
-        task = progress.add_task("[cyan]Descargando datos...", total=2)
+        task = progress.add_task("[cyan]Descargando datos...", total=len(years_to_scrape))
         
-        # aaa obtenemos ambos lineups -bynd
-        cars_2024 = fetch_2024_lineup()
-        progress.update(task, advance=1)
-        
-        cars_2025 = fetch_2025_lineup()
-        progress.update(task, advance=1)
-    
-    all_cars = cars_2024 + cars_2025
+        for year in years_to_scrape:
+            csv_file = scrape_year_to_csv(year)
+            if csv_file:
+                cars = csv_to_json(csv_file, year)
+                all_cars.extend(cars)
+            progress.update(task, advance=1)
     
     if not all_cars:
         console.print("[red]No se pudieron obtener datos[/red]")
@@ -216,7 +271,7 @@ def build_hotlist():
         
         hotlist_entry = {
             "id": f"{car['year']}-{car['number']}",
-            "number": f"{car['number']}/{250 if car['year'] == 2024 else 250}",
+            "number": f"{car['number']}/{250}",
             "name": car["name"],
             "series": car["series"],
             "year": car["year"],
@@ -235,6 +290,8 @@ def build_hotlist():
     save_hotlist(hotlist)
     
     console.print(f"[green]✓ Hotlist generada con {len(hotlist)} carritos[/green]")
+    console.print()
+    input("Presiona Enter para continuar...")
     return hotlist
 
 def save_hotlist(hotlist):
@@ -294,6 +351,7 @@ def show_hotlist_stats():
     
     if not hotlist:
         console.print("[yellow]No hay hotlist. Genera una primero (opción 1)[/yellow]")
+        input("\nPresiona Enter para continuar...")
         return
     
     console.clear()
@@ -330,6 +388,17 @@ def show_hotlist_stats():
         table.add_row(brand, str(count))
     
     console.print(table)
+    
+    # aaa stats por año -bynd
+    years = {}
+    for car in hotlist:
+        year = car["year"]
+        years[year] = years.get(year, 0) + 1
+    
+    console.print(f"\n[bold]Por Año:[/bold]")
+    for year in sorted(years.keys()):
+        console.print(f"  {year}: {years[year]} carritos")
+    
     console.print()
     input("Presiona Enter para continuar...")
 
