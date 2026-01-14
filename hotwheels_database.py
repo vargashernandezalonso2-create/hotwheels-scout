@@ -100,8 +100,11 @@ def csv_to_json(csv_file, year):
     try:
         df = pd.read_csv(csv_file, encoding='utf-8')
         
-        # chintrolas normalizamos nombres de columnas -bynd
-        df.columns = df.columns.str.lower().str.strip()
+        # chintrolas limpiamos el dataframe -bynd
+        # fokeis removemos filas completamente vacías -bynd
+        df = df.dropna(how='all')
+        
+        console.print(f"[dim]Columnas encontradas: {list(df.columns)}[/dim]")
         
         cars = []
         
@@ -109,38 +112,58 @@ def csv_to_json(csv_file, year):
             # ey intentamos extraer info de diferentes formatos -bynd
             car_data = {}
             
-            # fokeis diferentes sitios tienen diferentes columnas -bynd
-            # vavavava intentamos encontrar el nombre -bynd
+            # vavavava buscamos el nombre en columnas posibles -bynd
             name = None
-            for col in ['name', 'casting', 'model', 'car']:
-                if col in row and pd.notna(row[col]):
-                    name = str(row[col]).strip()
-                    break
+            possible_name_cols = [
+                'Model Name', 'model name', 'Model', 'model', 
+                'Name', 'name', 'Casting', 'casting', 'Car', 'car'
+            ]
             
-            if not name or name == 'nan':
+            for col in possible_name_cols:
+                if col in df.columns and pd.notna(row[col]):
+                    name = str(row[col]).strip()
+                    if name and name != 'nan' and name != '':
+                        break
+            
+            if not name or name == 'nan' or name == '':
                 continue  # aaa skip si no tiene nombre -bynd
             
             # chintrolas serie -bynd
             series = "Unknown"
-            for col in ['series', 'segment', 'line', 'collection']:
-                if col in row and pd.notna(row[col]):
+            possible_series_cols = [
+                'Series', 'series', 'Segment', 'segment', 
+                'Line', 'line', 'Collection', 'collection'
+            ]
+            
+            for col in possible_series_cols:
+                if col in df.columns and pd.notna(row[col]):
                     series = str(row[col]).strip()
-                    break
+                    if series and series != 'nan' and series != '':
+                        break
             
             # ey número -bynd
             number = str(idx + 1)
-            for col in ['#', 'number', 'no', 'num']:
-                if col in row and pd.notna(row[col]):
-                    number = str(row[col]).strip()
-                    break
+            possible_num_cols = [
+                'Toy #', 'toy #', '#', 'Col.#', 'col.#',
+                'Number', 'number', 'No', 'no', 'Num', 'num',
+                'Series #', 'series #'
+            ]
+            
+            for col in possible_num_cols:
+                if col in df.columns and pd.notna(row[col]):
+                    num_val = str(row[col]).strip()
+                    if num_val and num_val != 'nan' and num_val != '':
+                        number = num_val
+                        break
             
             # fokeis detectamos TH y STH -bynd
             is_th = False
             is_sth = False
-            row_str = str(row).lower()
-            if 'super treasure hunt' in row_str or 'sth' in row_str:
+            row_str = str(row.values).lower()
+            if 'super treasure hunt' in row_str or 'sth' in row_str or '$th' in row_str:
                 is_sth = True
-            elif 'treasure hunt' in row_str or 'th' in row_str:
+                is_th = False
+            elif 'treasure hunt' in row_str or ' th ' in row_str:
                 is_th = True
             
             car_data = {
@@ -159,6 +182,8 @@ def csv_to_json(csv_file, year):
         
     except Exception as e:
         console.print(f"[red]Error procesando CSV: {e}[/red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         return []
 
 def classify_car(car):
